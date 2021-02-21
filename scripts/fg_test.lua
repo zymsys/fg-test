@@ -1,6 +1,6 @@
--- Reach out to Superteddy57 at Smiteworks when you have this ready for beta testing.
--- Moon Wizard says he's working on automated API tests.
--- https://discord.com/channels/274582899045695488/275749854435868682/812773250731343882
+-- Constants
+local TEST_TYPE_UNIT = 'unit'
+local TEST_TYPE_BEHAVIOURAL = 'behavioural'
 
 -- Default to presenting only failures in chat
 local bVerbose = false
@@ -13,6 +13,7 @@ local nBehaviouralFailureCount = 0
 
 -- Other state
 local aBehaviouralContexts = {}
+local aTestQueue = {}
 
 function onInit()
     Comm.registerSlashHandler("test", startTests)
@@ -21,11 +22,9 @@ end
 function startTests(_, sParams)
     initializeTestRun()
     parseParams(sParams)
-    runUnitTests()
-    if nUnitFailureCount == 0 then
-        runBehaviouralTests()
-    end
-    showSummary()
+    queueUnitTests()
+    queueBehaviouralTests()
+    nextTest()
 end
 
 function registerBehaviouralContext(context)
@@ -48,6 +47,7 @@ function initializeTestRun()
     nUnitFailureCount = 0
     nBehaviouralSuccessCount = 0
     nBehaviouralFailureCount = 0
+    aTestQueue = {}
 end
 
 function parseParams(sParams)
@@ -59,7 +59,7 @@ function parseParams(sParams)
     end
 end
 
-function runUnitTests()
+function queueUnitTests()
     if not TestSuite.getTests then
         Comm.addChatMessage({text = "TestSuite must return a list of test functions in getTests()"})
     end
@@ -75,14 +75,60 @@ function runUnitTests()
             end
         end
         for invocation, aArguments in pairs(aInvocationsAndArguments) do
-            invokeUnitTest(sTestName, invocation, fTest, aArguments)
+            table.insert(aTestQueue, {
+                sType = TEST_TYPE_UNIT,
+                sName = sTestName,
+                invocation = invocation,
+                fTest = fTest,
+                aArguments = aArguments,
+            })
         end
+    end
+end
+
+function nextTest()
+    rTest = aTestQueue[1]
+    aTestQueue = { unpack(aTestQueue, 2) }
+    if rTest then
+        local result
+        if rTest.aAnnounce then
+            for _, sMessage in ipairs(rTest.aAnnounce) do
+                Comm.addChatMessage({text = sMessage})
+            end
+        end
+        if rTest.sType == TEST_TYPE_UNIT then
+            result = invokeUnitTest(rTest.sName, rTest.invocation, rTest.fTest, rTest.aArguments)
+        elseif rTest.sType == TEST_TYPE_BEHAVIOURAL then
+            result = invokeBehaviouralTest(rTest.rGherkin, rTest.sScenarioName, rTest.rBehavior, rTest.fTest)
+        else
+            Comm.addChatMessage({text = "Unexpected test type: " .. rTest.sType})
+        end
+        if type(result) == 'table' and result._type and result._type == Promises.TYPE_PROMISE then
+            -- Test returned a promise. Wait for it to complete before moving on.
+            local successCallback = function()
+                -- The Lua stack size will only allow so many of these.
+                -- I don't know another way to go though without a nextTick() or heartbeat function.
+                -- Tested stack size up to 16,000 ok. Crashed at 17,000. Unsigned 16 bit int?
+                -- Anyway, with 16,000 we should be ok for practical purposes.
+                nextTest()
+            end
+            local failureCallback = function(error)
+                reportBehaviouralTestFailure(rTest.rGherkin, rTest.sScenarioName, rTest.rBehavior, error)
+                showSummary()
+            end
+            result:done(successCallback, failureCallback)
+        else
+            -- Normal synchronous response, move on with tail recursion
+            return nextTest()
+        end
+    else
+        showSummary()
     end
 end
 
 function invokeUnitTest(sTestName, invocation, fTest, aArguments)
     sTestName = sTestName .. ' (' .. invocation .. ')'
-    local bSuccess, err = pcall(fTest, unpack(aArguments))
+    local bSuccess, result = pcall(fTest, unpack(aArguments))
     if bSuccess then
         if bVerbose then
             Comm.addChatMessage({text = sTestName, icon="vam_fgtest_success"})
@@ -90,27 +136,29 @@ function invokeUnitTest(sTestName, invocation, fTest, aArguments)
         nUnitSuccessCount = nUnitSuccessCount + 1
     else
         if type(invocation) == 'string' then
+            sTestName = sTestName .. ' (' .. invocation .. ')'
         end
-        Comm.addChatMessage({text = sTestName .. ': ' .. err, icon="vam_fgtest_failure"})
+        Comm.addChatMessage({ text = sTestName .. ': ' .. result, icon="vam_fgtest_failure"})
         if #aArguments > 0 then
             Debug.chat(sTestName .. ' arguments:', aArguments)
         end
         nUnitFailureCount = nUnitFailureCount + 1
     end
+    return result
 end
 
-function runBehaviouralTests()
+function queueBehaviouralTests()
     for _, nStory in pairs(DB.getChildren('encounter')) do
         local sStoryName = DB.getValue(nStory, 'name')
         if GherkinHelper.isFeature(sStoryName) then
             rGherkin = GherkinHelper.parse(nStory)
-            runBehaviouralTest(rGherkin)
+            queueBehaviouralTest(rGherkin)
         end
     end
 end
 
 function invokeBehaviouralTest(rGherkin, sScenarioName, rBehavior, f)
-    local bSuccess, err = pcall(f, unpack(rBehavior.aArgs))
+    local bSuccess, result = pcall(f, unpack(rBehavior.aArgs))
     if bSuccess then
         nBehaviouralSuccessCount = nBehaviouralSuccessCount + 1
         if bVerbose then
@@ -119,31 +167,42 @@ function invokeBehaviouralTest(rGherkin, sScenarioName, rBehavior, f)
             end
         end
     else
-        nBehaviouralFailureCount = nBehaviouralFailureCount + 1
-        Comm.addChatMessage({
-            text = 'In ' .. rGherkin.feature .. ' / ' .. sScenarioName .. ' - ' .. rBehavior.sText .. ': ' .. err,
-            icon="vam_fgtest_failure",
-        })
+        reportBehaviouralTestFailure(rGherkin, sScenarioName, rBehavior, result)
     end
+    return result
 end
 
-function runBehaviouralTest(rGherkin)
-    if bVerbose then
-        Comm.addChatMessage({
-            text = "FGTest feature: " .. rGherkin.feature,
-        })
-    end
-    for nIndex, sScenarioName in ipairs(rGherkin.scenarioNames) do
-        if bVerbose then
-            Comm.addChatMessage({
-                text = "Scenario: " .. sScenarioName,
-            })
-        end
-        local aBehaviours = rGherkin.scenarios[nIndex]
-        for _, rBehavior in ipairs(aBehaviours) do
+function reportBehaviouralTestFailure(rGherkin, sScenarioName, rBehavior, result)
+    nBehaviouralFailureCount = nBehaviouralFailureCount + 1
+    Comm.addChatMessage({
+        text = 'In ' .. rGherkin.feature .. ' / ' .. sScenarioName .. ' - ' .. rBehavior.sText .. ': ' .. result,
+        icon="vam_fgtest_failure",
+    })
+end
+
+function queueBehaviouralTest(rGherkin)
+    for nScenarioIndex, sScenarioName in ipairs(rGherkin.scenarioNames) do
+        local aBehaviours = rGherkin.scenarios[nScenarioIndex]
+        for nBehaviourIndex, rBehavior in ipairs(aBehaviours) do
+            local rTest = {
+                sType = TEST_TYPE_BEHAVIOURAL,
+                aAnnounce = {},
+            }
+            if bVerbose then
+                if nScenarioIndex == 1 then
+                    table.insert(rTest.aAnnounce, "FGTest feature: " .. rGherkin.feature)
+                end
+                if nBehaviourIndex == 1 then
+                    table.insert(rTest.aAnnounce, "Scenario: " .. sScenarioName)
+                end
+            end
             local f = findBehaviouralFunction(rBehavior.sFunctionName)
             if f then
-                invokeBehaviouralTest(rGherkin, sScenarioName, rBehavior, f)
+                rTest['rGherkin'] = rGherkin
+                rTest['sScenarioName'] = sScenarioName
+                rTest['rBehavior'] = rBehavior
+                rTest['fTest'] = f
+                table.insert(aTestQueue, rTest)
             else
                 Comm.addChatMessage({
                     text = "No context found with function: " .. rBehavior.sFunctionName,

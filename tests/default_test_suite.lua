@@ -4,6 +4,8 @@ function getTests()
         'testIsScenario',
         'testIsGivenWhenThen',
         'testParseGivenWhenThen',
+        'testPromiseChaining',
+        --'testPromiseRoll',
     }
 end
 
@@ -63,4 +65,46 @@ function testParseGivenWhenThen()
     Assert.count(2, p.aArgs)
     Assert.equals('Dorarsot Stormhead', p.aArgs[1])
     Assert.equals('5', p.aArgs[2])
+end
+
+function testPromiseChaining()
+    Promises.promise(function (resolve)
+        resolve(42) -- Could have also seeded this value directly
+    end):andThen(function (resolve, n)
+        Assert.equals(42, n)
+        resolve(n + 22)
+    end):andThen(function(resolve, n)
+        Assert.equals(64, n)
+        resolve(math.sqrt(n))
+    end):done(function(actual)
+        Assert.equals(8, actual)
+    end)
+end
+
+function testPromiseRoll()
+    local sTestRollType = 'fgtest'
+
+    return Promises.promise(function (resolve)
+        -- Initiate async action
+        ActionsManager.performAction(nil, nil, {
+            aDice = { { type = 'd4' } },
+            nMod = 0,
+            sType = sTestRollType,
+            sDesc = '',
+            bSecret = false,
+        });
+        resolve()
+    end):andThen(function (resolve)
+        -- Detect resolution of async action
+        ActionsManager.registerPostRollHandler(sTestRollType, function(_, rRoll)
+            resolve(rRoll)
+        end)
+    end):andThen(function(resolve, rRoll)
+        -- Clean up and test result
+        ActionsManager.unregisterPostRollHandler(sTestRollType)
+        local result = rRoll.aDice[1].value
+        Assert.greaterThanOrEqualTo(1, result)
+        Assert.lessThanOrEqualTo(4, result)
+        resolve()
+    end)
 end
