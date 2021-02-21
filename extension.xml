@@ -1,0 +1,24 @@
+<root version="2.0">
+    <properties>
+        <name>FG Test</name>
+        <version>0.1</version>
+
+        <author>Vic Metcalfe</author>
+        <description>Vam's Fantasy Grounds Test Harness</description>
+        <loadorder>1</loadorder>
+    </properties>
+
+    <announcement text="Vam's Fantasy Grounds Test Harness" />
+
+    <base>
+        <!-- FG Test source -->
+        <script name="FGTest" file="scripts/fg_test.lua" />
+        <script name="Assert" file="scripts/assert.lua" />
+        <script name="GherkinHelper" file="scripts/gherkin_helper.lua" />
+        <script name="TestSuite" file="tests/default_test_suite.lua" />
+
+        <!-- Icons for success / failure -->
+        <icon name="vam_fgtest_success" file="icons/D20 Crit Success.png" />
+        <icon name="vam_fgtest_failure" file="icons/D20 Crit Fail.png" />
+    </base>
+</root>
