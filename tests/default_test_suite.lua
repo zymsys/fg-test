@@ -68,12 +68,13 @@ function testParseGivenWhenThen()
 end
 
 function testPromiseChaining()
-    Promises.promise(function (resolve)
-        resolve(42) -- Could have also seeded this value directly
-    end):andThen(function (resolve, n)
+    local promiseToAddTwentyTwo = Promises.promise(function (resolve, n)
         Assert.equals(42, n)
         resolve(n + 22)
-    end):andThen(function(resolve, n)
+    end)
+    Promises.promise(42
+    ):andThen(promiseToAddTwentyTwo
+    ):andThen(function(resolve, n)
         Assert.equals(64, n)
         resolve(math.sqrt(n))
     end):done(function(actual)
