@@ -1,7 +1,7 @@
 <root version="2.0">
     <properties>
         <name>FG Test</name>
-        <version>0.1</version>
+        <version>0.2</version>
 
         <author>Vic Metcalfe</author>
         <description>Vam's Fantasy Grounds Test Harness</description>

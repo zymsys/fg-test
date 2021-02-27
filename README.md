@@ -258,10 +258,81 @@ Give it another reload/retest cycle and it should now show you behavioural tests
 ## Step 3: Tinker
 Change a number in the gherkin to invalidate the test, and run `/test` and it should fail. There's no nead to reload now because it re-parses the story as a gherkin for each run.
 
-# That's all for now
-This is just one weekend's work so far, including this readme / tutorial. I've also this weekend started a "promises" library which should make writing tests for async code such as dice rolls pretty straight forward if it goes to plan.
+# Promises
+Promises a way to return a promise to do something in the future instead of returning the value immediately. They are helpful when you want to test things that can't happen immediately such as dice rolls.
 
-Other than that, I'd like to:
+Here is a promise to roll a die:
+
+```lua
+Promises.promise(function (resolve)
+  -- Detect resolution of async action
+  ActionsManager.registerPostRollHandler(sTestRollType, function(_, rRoll)
+    ActionsManager.unregisterPostRollHandler(sTestRollType)
+    resolve(rRoll)
+  end)
+  -- Initiate async action
+  ActionsManager.performAction(nil, nil, {
+    aDice = { { type = 'd4' } },
+    nMod = 0,
+    sType = 'fgtest',
+    sDesc = '',
+    bSecret = false,
+  })
+end)
+```
+
+The promise function in the Promises library makes a promise from a function. That function receives a parameter called resolve, which you can call when the function has completed its work. For this example we don't call the resolve function until after we've received a notification from ActionsManager that the roll has completed.
+
+This example won't actually do the roll. It's just a promise to do the roll later. If a test method returned this promise the test framework would see that it got back a promise and it would wait for the promise to complete before running the next test. In this way async tests can be run one after another instead of all at once.
+
+## Chaining promises with andThen()
+Multiple async operations can be chained together for cases where the result of one operation feeds into the next. This example is not async so that we can focus on the chaining instead of on async, but normally you would use this for async operations.
+
+```lua
+    local p = Promises.promise(function (resolve)
+        resolve(42) -- Could have also seeded this value directly
+    end):andThen(function (resolve, n)
+        Assert.equals(42, n)
+        resolve(n + 22)
+    end):andThen(function(resolve, n)
+        Assert.equals(64, n)
+        resolve(math.sqrt(n))
+    end)
+```
+The first promise simply resolves to 42. If you really want to seed a value you this you could pass it directly to the promise function like so:
+```lua
+local p = Promises.promise(42)
+```
+But normally these are used for async, which means you'll have to trigger the resolve function through a callback, so I've resolved the callback manually. That value is then passed to the next function provided by `andThen()`. The assert here confirms that we have indeed received the value 42. We then add 22 and pass the result to the next part of the chain with the resolve method.
+
+The `andThen()` method can also take another promise so that multiple promise chains can be combined into a larger promise.
+
+The last method recives the sum of 42 and 22 and confirms that the result is 64. It then resolves to the square root of that number which is 8. Now, let's look at how we run promises and obtain the end result.
+
+## Completing a promise with done()
+If you want to execute the promise you need to call the `done()` method. When you run them under fg-test you should allow it to call the done method for you. You can use promises in your own code by copying out the `promises.lua` script into your own extension. You have my permission to use it, as well as any other part of fg-test for any purpose without attribution or any restriction on commercial use. If you do use promises yourself you'll need to call done yourself.
+
+```lua
+p:done(function(result) 
+  Assert.equals(8, result)
+end)
+```
+
+Since the result of the above promise chain is 8, this assert should be true if we call done.
+
+## Error handling
+If an exception is thrown at any step with lua's `error()` function, the chain is broken and the error is returned to the done method via a second optional callback. If the failure callback is not provided then the error will be reported to the Fantasy Grounds console. For example:
+
+```lua
+p:done(function(result) 
+  -- Handle success
+end, function(error) 
+  -- Handle an error condition
+end)
+```
+
+# Roadmap
+* Use fg-test for ChatBat to see how it and promises work "in the real world"
 * Add more assertions to the assertion library
 * Add some library contexts for things like the combat tracker, dice rolling, and the 5e ruleset
 * I'd like to include library contexts for other rulesets, but I'll leave those up to developers who use those rulesets

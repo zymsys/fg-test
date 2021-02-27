@@ -103,7 +103,7 @@ function nextTest()
         else
             Comm.addChatMessage({text = "Unexpected test type: " .. rTest.sType})
         end
-        if type(result) == 'table' and result._type and result._type == Promises.TYPE_PROMISE then
+        if Promises.isPromise(result) then
             -- Test returned a promise. Wait for it to complete before moving on.
             local successCallback = function()
                 -- The Lua stack size will only allow so many of these.
