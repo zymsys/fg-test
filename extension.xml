@@ -14,6 +14,7 @@
         <!-- FG Test source -->
         <script name="FGTest" file="scripts/fg_test.lua" />
         <script name="Assert" file="scripts/assert.lua" />
+        <script name="Promises" file="scripts/promises.lua" />
         <script name="GherkinHelper" file="scripts/gherkin_helper.lua" />
         <script name="TestSuite" file="tests/default_test_suite.lua" />
 
