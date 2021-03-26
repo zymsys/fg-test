@@ -65,6 +65,7 @@ function parseGivenWhenThen(sLine)
             if bEndQuote then
                 local sArg = table.concat(aQuoted, ' ')
                 table.insert(aArgs, sArg)
+                aQuoted = {}
             end
         elseif StringManager.isNumberString(sWord) then
             table.insert(aArgs, sWord)
